@@ -1,0 +1,19 @@
+{
+  "name": "ferryhook",
+  "private": true,
+  "scripts": {
+    "dev": "sst dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "deploy": "sst deploy",
+    "typecheck": "turbo typecheck"
+  },
+  "devDependencies": {
+    "sst": "^3.0.0",
+    "aws-cdk-lib": "2.171.1",
+    "constructs": "10.4.2",
+    "turbo": "^2.0.0",
+    "typescript": "^5.5.0"
+  }
+}

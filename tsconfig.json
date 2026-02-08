@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "paths": {
+      "@ferryhook/core": ["./packages/core/src"],
+      "@ferryhook/core/*": ["./packages/core/src/*"],
+      "@ferryhook/functions": ["./packages/functions/src"],
+      "@ferryhook/functions/*": ["./packages/functions/src/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist", ".sst", ".turbo"]
+}
