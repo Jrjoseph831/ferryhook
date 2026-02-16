@@ -1,9 +1,8 @@
 import type { SQSEvent } from "aws-lambda";
 import {
   events,
-  connections,
+  connectionCache,
   queueProducer,
-  verifyInboundSignature,
 } from "@ferryhook/core";
 import type { Connection, FilterRule, TransformConfig } from "@ferryhook/core";
 
@@ -39,8 +38,8 @@ export async function main(sqsEvent: SQSEvent): Promise<void> {
 
       await events.updateStatus(eventId, "processing");
 
-      // 2. Load connections for this source
-      const conns = await connections.listBySource(sourceId);
+      // 2. Load connections for this source (cached — 1 min TTL)
+      const conns = await connectionCache.getCachedConnections(sourceId);
       const activeConns = conns.filter((c) => c.status === "active");
 
       if (activeConns.length === 0) {
@@ -78,7 +77,7 @@ export async function main(sqsEvent: SQSEvent): Promise<void> {
           record: record.body,
         })
       );
-      throw err; // Re-throw to trigger SQS retry
+      throw err;
     }
   }
 }
@@ -87,10 +86,7 @@ async function processConnection(
   evt: { eventId: string; sourceId: string; userId: string; headers: string; body: string },
   conn: Connection
 ): Promise<void> {
-  // a. Signature verification (if the source has a signing config, verify via the connection)
-  // For now, signature verification is handled at source level, not connection level.
-
-  // b. Filters — accept/reject based on payload
+  // a. Filters — accept/reject based on payload
   if (conn.filters && conn.filters.length > 0) {
     const passes = evaluateFilters(evt.body, conn.filters);
     if (!passes) {
@@ -106,13 +102,13 @@ async function processConnection(
     }
   }
 
-  // c. Transformation — reshape payload
+  // b. Transformation — reshape payload
   let payload = evt.body;
   if (conn.transform && conn.transform.type !== "passthrough") {
     payload = applyTransform(payload, conn.transform);
   }
 
-  // d. Parse original headers for forwarding
+  // c. Parse original headers for forwarding
   let originalHeaders: Record<string, string> = {};
   try {
     originalHeaders = JSON.parse(evt.headers);
@@ -120,7 +116,7 @@ async function processConnection(
     // Ignore parse errors
   }
 
-  // e. Queue delivery task
+  // d. Queue delivery task
   await queueProducer.sendToDeliver({
     eventId: evt.eventId,
     connectionId: conn.connectionId,
@@ -139,7 +135,7 @@ function evaluateFilters(body: string, filters: FilterRule[]): boolean {
   try {
     parsed = JSON.parse(body);
   } catch {
-    return true; // Can't parse, pass through
+    return true;
   }
 
   for (const filter of filters) {
@@ -190,7 +186,6 @@ function getNestedValue(
   obj: Record<string, unknown>,
   path: string
 ): unknown {
-  // Simple dot-notation path resolver (e.g., "$.type" or "data.object.amount")
   const cleanPath = path.replace(/^\$\./, "");
   const parts = cleanPath.split(".");
   let current: unknown = obj;

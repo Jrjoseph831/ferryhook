@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { z } from "zod";
-import { sources, connections, isAllowedUrl, PLAN_LIMITS } from "@ferryhook/core";
+import { sources, connections, connectionCache, isAllowedUrl, PLAN_LIMITS } from "@ferryhook/core";
 import type { Plan } from "@ferryhook/core";
 import { authenticate } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
@@ -9,26 +9,15 @@ import * as response from "../../middleware/response.js";
 const filterRuleSchema = z.object({
   path: z.string(),
   operator: z.enum([
-    "equals",
-    "not_equals",
-    "contains",
-    "not_contains",
-    "exists",
-    "not_exists",
-    "regex",
-    "gt",
-    "lt",
-    "gte",
-    "lte",
+    "equals", "not_equals", "contains", "not_contains",
+    "exists", "not_exists", "regex", "gt", "lt", "gte", "lte",
   ]),
   value: z.union([z.string(), z.number(), z.boolean()]).optional(),
 });
 
 const transformSchema = z.object({
   type: z.enum(["field_map", "passthrough", "javascript"]),
-  rules: z
-    .array(z.object({ from: z.string(), to: z.string() }))
-    .optional(),
+  rules: z.array(z.object({ from: z.string(), to: z.string() })).optional(),
   code: z.string().optional(),
 });
 
@@ -54,20 +43,17 @@ export async function main(
       return response.validationError(validation.errors);
     }
 
-    // Verify source ownership
     const source = await sources.getById(sourceId);
     if (!source || source.userId !== auth.userId || source.status === "deleted") {
       return response.notFound("Source");
     }
 
-    // Validate destination URL (SSRF check)
     if (!isAllowedUrl(validation.data.destinationUrl)) {
       return response.validationError([
         { field: "destinationUrl", message: "Destination URL is not allowed" },
       ]);
     }
 
-    // Check connection limit
     const existingConns = await connections.listBySource(sourceId);
     const activeConns = existingConns.filter((c) => c.status !== "deleted");
     const limit = PLAN_LIMITS[auth.plan as Plan].maxConnectionsPerSource;
@@ -87,6 +73,9 @@ export async function main(
       filters: validation.data.filters,
       transform: validation.data.transform,
     });
+
+    // Invalidate connection cache
+    await connectionCache.invalidateConnections(sourceId);
 
     console.log(
       JSON.stringify({

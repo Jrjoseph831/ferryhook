@@ -57,7 +57,13 @@ export function getConfig() {
     processQueueUrl: r.ProcessQueue.url,
     deliverQueueUrl: r.DeliverQueue.url,
     jwtSecret: r.JwtSecret.value,
+    redisUrl: r.Redis?.host
+      ? `redis://${r.Redis.host}:${r.Redis.port}`
+      : process.env.REDIS_URL ?? "redis://localhost:6379",
+    stripeSecretKey: r.StripeSecretKey?.value ?? process.env.STRIPE_SECRET_KEY ?? "",
+    stripeWebhookSecret: r.StripeWebhookSecret?.value ?? process.env.STRIPE_WEBHOOK_SECRET ?? "",
     hooksDomain: process.env.HOOKS_DOMAIN ?? "hooks.ferryhook.io",
     appUrl: process.env.APP_URL ?? "https://ferryhook.io",
+    sesFromEmail: process.env.SES_FROM_EMAIL ?? "alerts@ferryhook.io",
   };
 }
