@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { z } from "zod";
-import { sources, getConfig } from "@ferryhook/core";
+import { sources, sourceCache, getConfig } from "@ferryhook/core";
 import { authenticate } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
 import * as response from "../../middleware/response.js";
@@ -29,7 +29,6 @@ export async function main(
       return response.validationError(validation.errors);
     }
 
-    // Verify ownership
     const existing = await sources.getById(sourceId);
     if (!existing || existing.userId !== auth.userId || existing.status === "deleted") {
       return response.notFound("Source");
@@ -37,6 +36,9 @@ export async function main(
 
     const updated = await sources.update(sourceId, auth.userId, validation.data);
     const config = getConfig();
+
+    // Invalidate cache
+    await sourceCache.invalidateSource(sourceId);
 
     console.log(
       JSON.stringify({

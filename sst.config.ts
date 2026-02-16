@@ -12,6 +12,8 @@ export default $config({
   async run() {
     const { mainTable, eventsTable } = await import("./infra/database");
     const { processQueue, deliverQueue, dlq } = await import("./infra/queue");
+    const { redis } = await import("./infra/cache");
+    const { failureTopic } = await import("./infra/alerts");
     const { ingestApi, managementApi } = await import("./infra/api");
 
     return {

@@ -1,9 +1,10 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import {
-  sources,
+  sourceCache,
   events,
   users,
   queueProducer,
+  checkRateLimit,
   PLAN_LIMITS,
 } from "@ferryhook/core";
 import type { Plan } from "@ferryhook/core";
@@ -18,8 +19,8 @@ export async function main(
       return response.notFound("Source");
     }
 
-    // 1. Validate source exists
-    const source = await sources.getById(sourceId);
+    // 1. Validate source exists (cached — 5 min TTL)
+    const source = await sourceCache.getCachedSource(sourceId);
     if (!source || source.status !== "active") {
       return response.notFound("Source");
     }
@@ -30,17 +31,26 @@ export async function main(
       return response.notFound("Source");
     }
 
-    // 3. Check monthly usage limit
-    const planLimits = PLAN_LIMITS[user.plan as Plan];
-    if (user.usageThisMonth >= planLimits.eventsPerMonth) {
-      return response.error(
-        403,
-        "PLAN_LIMIT_REACHED",
-        "Monthly event limit reached"
-      );
+    // 3. Rate limit check (Redis sliding window)
+    const withinLimit = await checkRateLimit(sourceId, user.plan as Plan);
+    if (!withinLimit) {
+      return response.rateLimited();
     }
 
-    // 4. Store raw event in DynamoDB
+    // 4. Check monthly usage limit
+    const planLimits = PLAN_LIMITS[user.plan as Plan];
+    if (user.usageThisMonth >= planLimits.eventsPerMonth) {
+      if (user.plan === "free") {
+        return response.error(
+          429,
+          "PLAN_LIMIT_REACHED",
+          "Monthly event limit reached. Upgrade to continue."
+        );
+      }
+      // Paid plans: allow but flag for overage billing
+    }
+
+    // 5. Store raw event in DynamoDB
     const ttlSeconds = planLimits.retentionTtlSeconds;
     const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
 
@@ -55,13 +65,13 @@ export async function main(
       expiresAt,
     });
 
-    // 5. Queue for processing
+    // 6. Queue for processing
     await queueProducer.sendToProcess({
       eventId: storedEvent.eventId,
       sourceId,
     });
 
-    // 6. Increment usage counter
+    // 7. Increment usage counter (fire-and-forget)
     users.incrementUsage(source.userId).catch((err) => {
       console.error(
         JSON.stringify({
@@ -72,14 +82,6 @@ export async function main(
         })
       );
     });
-
-    // 7. Update source event count (fire-and-forget)
-    sources
-      .update(sourceId, source.userId, {
-        eventCount: source.eventCount + 1,
-        lastEventAt: new Date().toISOString(),
-      })
-      .catch(() => {});
 
     console.log(
       JSON.stringify({

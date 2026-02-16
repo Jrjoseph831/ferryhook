@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
-import { sources } from "@ferryhook/core";
+import { sources, sourceCache } from "@ferryhook/core";
 import { authenticate } from "../../middleware/auth.js";
 import * as response from "../../middleware/response.js";
 
@@ -13,13 +13,13 @@ export async function main(
     const sourceId = event.pathParameters?.id;
     if (!sourceId) return response.notFound("Source");
 
-    // Verify ownership
     const existing = await sources.getById(sourceId);
     if (!existing || existing.userId !== auth.userId || existing.status === "deleted") {
       return response.notFound("Source");
     }
 
     await sources.delete(sourceId, auth.userId);
+    await sourceCache.invalidateSource(sourceId);
 
     console.log(
       JSON.stringify({

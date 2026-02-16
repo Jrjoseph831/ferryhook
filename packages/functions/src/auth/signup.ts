@@ -1,6 +1,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { z } from "zod";
 import { users, jwt, hashPassword } from "@ferryhook/core";
+import { stripe } from "@ferryhook/core/src/billing/stripe.js";
 import { validateBody } from "../middleware/validate.js";
 import * as response from "../middleware/response.js";
 
@@ -39,6 +40,23 @@ export async function main(
       name,
       passwordHash,
     });
+
+    // Create Stripe customer (fire-and-forget)
+    stripe
+      .createCustomer(email, user.userId)
+      .then(async (customerId) => {
+        await users.update(user.userId, { stripeCustomerId: customerId });
+      })
+      .catch((err) => {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            message: "Failed to create Stripe customer",
+            userId: user.userId,
+            error: String(err),
+          })
+        );
+      });
 
     // Generate JWT
     const accessToken = await jwt.signAccessToken({

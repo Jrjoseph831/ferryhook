@@ -1,4 +1,6 @@
 import type { SQSEvent } from "aws-lambda";
+import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
+import { Resource } from "sst";
 import {
   events,
   attempts,
@@ -10,6 +12,8 @@ import {
   SQS_MAX_DELAY_SECONDS,
 } from "@ferryhook/core";
 import type { DeliveryTask } from "@ferryhook/core";
+
+const sns = new SNSClient({});
 
 export async function main(sqsEvent: SQSEvent): Promise<void> {
   for (const record of sqsEvent.Records) {
@@ -149,6 +153,10 @@ async function deliverEvent(task: DeliveryTask): Promise<void> {
 async function handleRetry(task: DeliveryTask): Promise<void> {
   if (task.attempt >= MAX_RETRY_ATTEMPTS) {
     await events.updateStatus(task.eventId, "failed");
+
+    // Publish failure alert to SNS
+    await publishFailureAlert(task);
+
     console.log(
       JSON.stringify({
         level: "error",
@@ -170,4 +178,36 @@ async function handleRetry(task: DeliveryTask): Promise<void> {
   );
 
   await events.updateStatus(task.eventId, "retrying");
+}
+
+async function publishFailureAlert(task: DeliveryTask): Promise<void> {
+  try {
+    const evt = await events.getById(task.eventId);
+    if (!evt) return;
+
+    const r = Resource as unknown as Record<string, Record<string, string>>;
+    const topicArn = r.FailureTopic?.arn;
+    if (!topicArn) return;
+
+    await sns.send(
+      new PublishCommand({
+        TopicArn: topicArn,
+        Message: JSON.stringify({
+          eventId: task.eventId,
+          connectionId: task.connectionId,
+          userId: evt.userId,
+          attempt: task.attempt,
+        }),
+      })
+    );
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        message: "Failed to publish failure alert",
+        eventId: task.eventId,
+        error: String(err),
+      })
+    );
+  }
 }
